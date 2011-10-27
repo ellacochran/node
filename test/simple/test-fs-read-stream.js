@@ -153,3 +153,70 @@ stream.on('end', function() {
 var pauseRes = fs.createReadStream(rangeFile);
 pauseRes.pause();
 pauseRes.resume();
+
+
+// pause on end (follow a file)
+(function() {
+  var tfn = path.join(common.fixturesDir, 'tail.txt');
+  var ostream = fs.createWriteStream(tfn);
+  ostream.on('open', function() {
+    var written = 0;
+    var opened = 0;
+    var data = 0;
+    var read = 0;
+    var paused = 0;
+    var resumed = 0;
+    var ended = 0;
+    var buffer = new Buffer('01234567890');
+    var istream = fs.createReadStream(tfn, { pauseonend:true });
+    var doneTO;
+    var done = function(lastdata) {
+      if (data && (data == lastdata)) {
+        istream.destroy();
+        assert.equal(read, written, '1: bytes read != bytes written');
+        assert.equal(ended, 0, '1: stream ended');
+        assert.equal(paused, resumed + 1, '1: paused not once more than resumed');
+        return fs.unlinkSync(tfn);
+      }
+    };
+    istream.on('open', function() { 
+      opened++;
+    });
+    istream.on('data', function(chunk) { 
+      data++;
+      read += chunk.length;
+      if (doneTO) clearTimeout(doneTO);
+      var lastdata = data;
+      doneTO=setTimeout(function() { done(lastdata) }, 300);
+    });
+    istream.on('pause', function() { 
+      paused++;
+      setTimeout(istream.resume.bind(istream), 25);
+    });
+    istream.on('resume', function() { 
+      resumed++; 
+    });
+    istream.on('end', function() { 
+      ended++; 
+    });
+    
+    var writer = function() {
+      if (written >= 200) {
+        if (ostream) ostream.end();
+        if (written > 400) return;
+        ostream = fs.createWriteStream(tfn, { flags:'a' });
+        ostream.on('open', function() {
+          ostream.end(buffer);
+          written += buffer.length;
+          ostream = undefined;
+          setTimeout(writer, 100);
+        });
+        return;
+      }
+      ostream.write(buffer);
+      written += buffer.length;
+      setTimeout(writer, 10);
+    };
+    setTimeout(writer, 10);
+  });
+})();
